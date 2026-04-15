@@ -10,6 +10,7 @@ interface SidebarProps {
   isOpen: boolean;
   conversations: Conversation[];
   activeConvId: string | null;
+  generatingConvIds: Set<string>;
   onClose: () => void;
   onSelectConv: (id: string) => void;
   onDeleteConv: (id: string) => void;
@@ -34,10 +35,11 @@ function formatTime(ts: number): string {
 const ConversationItem: React.FC<{
   conv: Conversation;
   isActive: boolean;
+  isGenerating: boolean;
   theme: Theme;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
-}> = ({ conv, isActive, theme, onSelect, onDelete }) => {
+}> = ({ conv, isActive, isGenerating: convGenerating, theme, onSelect, onDelete }) => {
   const isDark = theme === 'dark';
   const count = conv.items.length;
 
@@ -50,6 +52,10 @@ const ConversationItem: React.FC<{
       }`}
       onClick={() => onSelect(conv.id)}
     >
+      {/* 生成中指示器 */}
+      {convGenerating && (
+        <span className={`flex-shrink-0 w-2 h-2 rounded-full animate-pulse ${isDark ? 'bg-amber-400' : 'bg-amber-500'}`} />
+      )}
       <div className="flex-1 min-w-0">
         <p className={`text-xs truncate ${
           isActive
@@ -59,7 +65,7 @@ const ConversationItem: React.FC<{
           {conv.title}
         </p>
         <p className={`text-[10px] mt-0.5 truncate ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-          {count > 0 ? `${count} 张图片 · ` : ''}{formatTime(conv.updatedAt)}
+          {convGenerating ? '生成中...' : (count > 0 ? `${count} 张图片 · ` : '')}{!convGenerating && formatTime(conv.updatedAt)}
         </p>
       </div>
       <button
@@ -78,7 +84,7 @@ const ConversationItem: React.FC<{
 /* ── Sidebar 主体 ──────────────────────────────── */
 
 const Sidebar: React.FC<SidebarProps> = ({
-  theme, isOpen, conversations, activeConvId,
+  theme, isOpen, conversations, activeConvId, generatingConvIds,
   onClose, onSelectConv, onDeleteConv, onClearAll, onOpenSettings, onNewChat,
 }) => {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -175,6 +181,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   key={conv.id}
                   conv={conv}
                   isActive={conv.id === activeConvId}
+                  isGenerating={generatingConvIds.has(conv.id)}
                   theme={theme}
                   onSelect={onSelectConv}
                   onDelete={setDeleteTarget}

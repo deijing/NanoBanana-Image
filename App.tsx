@@ -43,14 +43,13 @@ const App: React.FC = () => {
       return raw ? JSON.parse(raw) : DEFAULT_OPTIMIZE_CONFIG;
     } catch { return DEFAULT_OPTIMIZE_CONFIG; }
   });
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [currentPrompt, setCurrentPrompt] = useState<string>();
-  const [currentInputImage, setCurrentInputImage] = useState<string>();
+  // 按对话隔离的生成状态 Map<convId, { prompt, inputImage, controller }>
+  const generatingMapRef = useRef<Map<string, { prompt: string; inputImage?: string; controller: AbortController }>>(new Map());
+  const [generatingConvIds, setGeneratingConvIds] = useState<Set<string>>(new Set());
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showApiSetup, setShowApiSetup] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
 
   // ── 多对话状态 ────────────────────────────────────────
   const [conversations, setConversations] = useState<Conversation[]>(() => {
@@ -84,6 +83,12 @@ const App: React.FC = () => {
   const activeItems = useMemo(() => {
     return conversations.find(c => c.id === activeConvId)?.items || [];
   }, [conversations, activeConvId]);
+
+  // 当前对话的生成状态
+  const isGenerating = activeConvId ? generatingConvIds.has(activeConvId) : false;
+  const activeGenState = activeConvId ? generatingMapRef.current.get(activeConvId) : undefined;
+  const currentPrompt = activeGenState?.prompt;
+  const currentInputImage = activeGenState?.inputImage;
 
   // 所有对话总项数（用于侧栏显示）
   const totalItems = useMemo(() => conversations.reduce((s, c) => s + c.items.length, 0), [conversations]);
@@ -157,9 +162,10 @@ const App: React.FC = () => {
   // ── 对话管理 ───────────────────────────────────────────
 
   const handleNewChat = useCallback(() => {
-    // 如果当前对话是空的，不需要新建
+    // 如果当前对话是空的且没在生成，不需要新建
     const current = conversations.find(c => c.id === activeConvId);
-    if (current && current.items.length === 0) return;
+    const currentGenerating = activeConvId ? generatingConvIds.has(activeConvId) : false;
+    if (current && current.items.length === 0 && !currentGenerating) return;
 
     const newConv: Conversation = {
       id: `conv_${genId()}`,
@@ -170,12 +176,11 @@ const App: React.FC = () => {
     };
     setConversations(prev => [...prev, newConv]);
     setActiveConvId(newConv.id);
-  }, [conversations, activeConvId]);
+  }, [conversations, activeConvId, generatingConvIds]);
 
   const handleSelectConv = useCallback((id: string) => {
-    if (isGenerating) return;
     setActiveConvId(id);
-  }, [isGenerating]);
+  }, []);
 
   const handleDeleteConv = useCallback((id: string) => {
     const conv = conversations.find(c => c.id === id);
@@ -225,12 +230,14 @@ const App: React.FC = () => {
   }, [conversations, activeConvId]);
 
   const handleCancel = useCallback(() => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setIsGenerating(false);
-    setCurrentPrompt(undefined);
-    setCurrentInputImage(undefined);
-  }, []);
+    if (!activeConvId) return;
+    const state = generatingMapRef.current.get(activeConvId);
+    if (state) {
+      state.controller.abort();
+      generatingMapRef.current.delete(activeConvId);
+      setGeneratingConvIds(prev => { const next = new Set(prev); next.delete(activeConvId); return next; });
+    }
+  }, [activeConvId]);
 
   const handleToggleSidebar = useCallback(() => setSidebarOpen(prev => !prev), []);
   const handleCloseSidebar = useCallback(() => setSidebarOpen(false), []);
@@ -247,7 +254,7 @@ const App: React.FC = () => {
     inputImage?: string;
     inputImageMimeType?: string;
   }) => {
-    if (!apiKey || isGenerating) return;
+    if (!apiKey) return;
 
     // 确保有活跃对话
     let targetConvId = activeConvId;
@@ -266,16 +273,16 @@ const App: React.FC = () => {
     }
     const convId = targetConvId;
 
+    // 如果该对话已在生成，不重复触发
+    if (generatingMapRef.current.has(convId)) return;
+
     const style = STYLE_PRESETS.find(s => s.id === params.styleId);
     const prefix = style?.prefix || '';
     const fullPrompt = prefix ? `${prefix}${params.prompt}` : params.prompt;
 
-    setIsGenerating(true);
-    setCurrentPrompt(params.prompt);
-    setCurrentInputImage(params.inputImage);
-
     const controller = new AbortController();
-    abortRef.current = controller;
+    generatingMapRef.current.set(convId, { prompt: params.prompt, inputImage: params.inputImage, controller });
+    setGeneratingConvIds(prev => new Set(prev).add(convId));
 
     try {
       let inputImageRef: string | undefined;
@@ -390,15 +397,13 @@ const App: React.FC = () => {
       ));
       showMessage('生成出错', errMsg, 'error');
     } finally {
-      setIsGenerating(false);
-      setCurrentPrompt(undefined);
-      setCurrentInputImage(undefined);
-      abortRef.current = null;
+      generatingMapRef.current.delete(convId);
+      setGeneratingConvIds(prev => { const next = new Set(prev); next.delete(convId); return next; });
     }
-  }, [apiKey, imageBaseUrl, isGenerating, model, showMessage, activeConvId]);
+  }, [apiKey, imageBaseUrl, model, showMessage, activeConvId, conversations]);
 
   const handleEditItem = useCallback(async (itemId: string, newPrompt: string) => {
-    if (!activeConvId || isGenerating) return;
+    if (!activeConvId || generatingConvIds.has(activeConvId)) return;
     const conv = conversations.find(c => c.id === activeConvId);
     if (!conv) return;
 
@@ -428,7 +433,7 @@ const App: React.FC = () => {
       size: editedItem.size,
       styleId: 'none',
     });
-  }, [activeConvId, conversations, isGenerating, handleGenerate]);
+  }, [activeConvId, conversations, generatingConvIds, handleGenerate]);
 
   const handleRegenerateItem = useCallback((itemId: string) => {
     if (!activeConvId) return;
@@ -461,6 +466,7 @@ const App: React.FC = () => {
         isOpen={sidebarOpen}
         conversations={conversations}
         activeConvId={activeConvId}
+        generatingConvIds={generatingConvIds}
         onClose={handleCloseSidebar}
         onSelectConv={handleSelectConv}
         onDeleteConv={handleDeleteConv}
