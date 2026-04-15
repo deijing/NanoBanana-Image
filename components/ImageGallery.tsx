@@ -438,6 +438,7 @@ const GalleryCard: React.FC<{
 
 const ImageGallery: React.FC<ImageGalleryProps> = ({ theme, items, isGenerating, currentPrompt, currentInputImages, generatingStartTime, onEditItem, onRegenerateItem }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
   const isDark = theme === 'dark';
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
 
@@ -464,11 +465,17 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({ theme, items, isGenerating,
   }, [isGenerating, generatingStartTime]);
 
   // 自动滚动到底部
+  const prevItemsRef = useRef(items);
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const scrollToBottom = () => bottomRef.current?.scrollIntoView({ behavior: 'instant' as ScrollBehavior });
+    // 切换会话（items 引用变化且内容不同）时延迟滚动，等图片占位渲染
+    if (prevItemsRef.current !== items) {
+      prevItemsRef.current = items;
+      setTimeout(scrollToBottom, 50);
+    } else {
+      requestAnimationFrame(scrollToBottom);
     }
-  }, [items.length, isGenerating]);
+  }, [items, isGenerating]);
 
   return (
     <>
@@ -559,6 +566,7 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({ theme, items, isGenerating,
               </div>
             </div>
           )}
+          <div ref={bottomRef} />
         </div>
       </div>
 
