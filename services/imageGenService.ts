@@ -113,8 +113,34 @@ export async function generateImage(
     }
   }
 
-  // 3. 构建请求体
-  const parts: Array<Record<string, unknown>> = [{ text: finalPrompt }];
+  // 3. 构建请求体 — 多轮对话 contents
+  const contents: Array<Record<string, unknown>> = [];
+
+  // 历史消息
+  if (req.history?.length) {
+    for (const h of req.history) {
+      // user turn
+      contents.push({ role: 'user', parts: [{ text: h.prompt }] });
+      // model turn (with image if available)
+      if (h.imageData) {
+        let base64 = h.imageData;
+        let mimeType = 'image/png';
+        if (base64.startsWith('data:')) {
+          const [header, data] = base64.split(',');
+          const match = header.match(/data:(image\/\w+);base64/);
+          if (match) mimeType = match[1];
+          base64 = data;
+        }
+        contents.push({
+          role: 'model',
+          parts: [{ inline_data: { mime_type: mimeType, data: base64 } }],
+        });
+      }
+    }
+  }
+
+  // 当前用户消息
+  const currentParts: Array<Record<string, unknown>> = [{ text: finalPrompt }];
 
   if (req.mode === 'img2img' && req.inputImage) {
     let base64 = req.inputImage;
@@ -125,22 +151,24 @@ export async function generateImage(
       if (match) mimeType = match[1];
       base64 = data;
     }
-    parts.push({
+    currentParts.push({
       inline_data: { mime_type: mimeType, data: base64 },
     });
   }
 
+  contents.push({ role: 'user', parts: currentParts });
+
   const imageConfig: Record<string, string> = {
     aspectRatio: req.aspectRatio || '1:1',
   };
-  if (req.mode !== 'img2img' && req.size) {
-    imageConfig.image_size = req.size;
+  if (req.size) {
+    imageConfig.imageSize = req.size;
   }
 
   const body = JSON.stringify({
-    contents: [{ parts }],
+    contents,
     generationConfig: {
-      responseModalities: ['IMAGE'],
+      responseModalities: ['TEXT', 'IMAGE'],
       imageConfig,
     },
   });

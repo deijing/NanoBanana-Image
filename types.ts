@@ -11,6 +11,13 @@ export interface OptimizeConfig {
   model: string;
 }
 
+/** 多轮对话历史条目 */
+export interface ChatHistoryItem {
+  prompt: string;
+  /** base64 data URI of generated image (if available) */
+  imageData?: string;
+}
+
 export interface ImageGenRequest {
   model: ImageModel;
   mode: ImageGenMode;
@@ -21,6 +28,8 @@ export interface ImageGenRequest {
   inputImageMimeType?: string;
   optimizePrompt?: boolean;
   optimizePresetId?: string;
+  /** 多轮对话历史（不含当前消息） */
+  history?: ChatHistoryItem[];
 }
 
 export interface ImageGenResult {

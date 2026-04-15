@@ -1,7 +1,7 @@
 // App.tsx — IkunImage 根组件（多对话管理 + 自定义模态框）
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import type { Theme, GalleryItem, ImageGenMode, ImageModel, OptimizeConfig, Conversation } from './types';
+import type { Theme, GalleryItem, ImageGenMode, ImageModel, OptimizeConfig, Conversation, ChatHistoryItem } from './types';
 import {
   LS_API_KEY,
   LS_IMAGE_BASE_URL,
@@ -17,7 +17,7 @@ import {
   normalizeBaseUrl,
 } from './constants';
 import { generateImage } from './services/imageGenService';
-import { saveImage, deleteImage } from './services/imageStore';
+import { saveImage, deleteImage, loadImage } from './services/imageStore';
 import KeySetup from './components/KeySetup';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
@@ -283,6 +283,18 @@ const App: React.FC = () => {
         inputImageRef = await saveImage(params.inputImage);
       }
 
+      // 构建多轮对话历史（仅包含成功生成的记录）
+      const conv = conversations.find(c => c.id === convId);
+      const successItems = (conv?.items ?? []).filter(it => it.imageRef && !it.error);
+      const history: ChatHistoryItem[] = [];
+      for (const it of successItems) {
+        const imgData = it.imageRef ? await loadImage(it.imageRef) : null;
+        history.push({
+          prompt: it.prompt,
+          imageData: imgData ?? undefined,
+        });
+      }
+
       const result = await generateImage(
         apiKey,
         imageBaseUrl,
@@ -294,6 +306,7 @@ const App: React.FC = () => {
           size: params.size,
           inputImage: params.inputImage,
           inputImageMimeType: params.inputImageMimeType,
+          history,
         },
         null,
         controller.signal,
