@@ -261,6 +261,19 @@ const App: React.FC = () => {
 
   // ── 生成 ───────────────────────────────────────────────
 
+  const buildHistory = useCallback(async (items: GalleryItem[]): Promise<ChatHistoryItem[]> => {
+    const successItems = items.filter(it => it.imageRef && !it.error);
+    const history: ChatHistoryItem[] = [];
+    for (const it of successItems) {
+      const imgData = it.imageRef ? await loadImage(it.imageRef) : null;
+      history.push({
+        prompt: it.prompt,
+        imageData: imgData ?? undefined,
+      });
+    }
+    return history;
+  }, []);
+
   const handleGenerate = useCallback(async (params: {
     prompt: string;
     mode: ImageGenMode;
@@ -268,6 +281,7 @@ const App: React.FC = () => {
     size: string;
     styleId: string;
     inputImages?: Array<{ data: string; mimeType: string }>;
+    historyItems?: GalleryItem[];
   }) => {
     if (!apiKey) return;
 
@@ -303,12 +317,13 @@ const App: React.FC = () => {
     const fullPrompt = prefix ? `${prefix}${params.prompt}` : params.prompt;
 
     const controller = new AbortController();
-    generatingMapRef.current.set(convId, { prompt: params.prompt, inputImages: params.inputImages, startTime: performance.now(), controller });
+    const startTime = performance.now();
+    generatingMapRef.current.set(convId, { prompt: params.prompt, inputImages: params.inputImages, startTime, controller });
     setGeneratingConvIds(prev => new Set(prev).add(convId));
+    const inputImageRefs: string[] = [];
 
     try {
       // 保存参考图到 IndexedDB
-      const inputImageRefs: string[] = [];
       if (params.inputImages?.length) {
         for (const img of params.inputImages) {
           inputImageRefs.push(await saveImage(img.data));
@@ -316,16 +331,8 @@ const App: React.FC = () => {
       }
 
       // 构建多轮对话历史（仅包含成功生成的记录）
-      const conv = conversations.find(c => c.id === convId);
-      const successItems = (conv?.items ?? []).filter(it => it.imageRef && !it.error);
-      const history: ChatHistoryItem[] = [];
-      for (const it of successItems) {
-        const imgData = it.imageRef ? await loadImage(it.imageRef) : null;
-        history.push({
-          prompt: it.prompt,
-          imageData: imgData ?? undefined,
-        });
-      }
+      const historySource = params.historyItems ?? conversations.find(c => c.id === convId)?.items ?? [];
+      const history = await buildHistory(historySource);
 
       const result = await generateImage(
         apiKey,
@@ -404,7 +411,8 @@ const App: React.FC = () => {
         size: params.size,
         mode: params.mode,
         model,
-        elapsed: Date.now() - Date.now(),
+        elapsed: Math.round(performance.now() - startTime),
+        inputImageRefs: inputImageRefs.length > 0 ? inputImageRefs : undefined,
         error: errMsg,
       };
       setConversations(prev => prev.map(c =>
@@ -421,7 +429,7 @@ const App: React.FC = () => {
       generatingMapRef.current.delete(convId);
       setGeneratingConvIds(prev => { const next = new Set(prev); next.delete(convId); return next; });
     }
-  }, [apiKey, imageBaseUrl, model, showMessage, activeConvId, conversations]);
+  }, [apiKey, imageBaseUrl, model, showMessage, activeConvId, conversations, buildHistory]);
 
   const handleEditItem = useCallback(async (itemId: string, newPrompt: string, inputImages?: Array<{ data: string; mimeType: string }>) => {
     if (!activeConvId || generatingConvIds.has(activeConvId)) return;
@@ -454,6 +462,7 @@ const App: React.FC = () => {
       size: editedItem.size,
       styleId: 'none',
       inputImages,
+      historyItems: keptItems,
     });
   }, [activeConvId, conversations, generatingConvIds, handleGenerate]);
 
