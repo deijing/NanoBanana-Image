@@ -220,7 +220,7 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({ isOpen, theme, items, onClo
             <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
               isDark ? 'bg-gray-700 text-gray-400' : 'bg-gray-200 text-gray-500'
             }`}>
-              {items.length}
+              {items.filter(it => !it.error).length}
             </span>
           </div>
           <button

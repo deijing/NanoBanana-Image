@@ -116,6 +116,7 @@ const HistoryGallery: React.FC<HistoryGalleryProps> = ({ open, theme, conversati
 
   const allItems = conversations
     .flatMap(c => c.items)
+    .filter(it => !it.error)
     .sort((a, b) => b.timestamp - a.timestamp);
 
   return (

@@ -41,7 +41,7 @@ const ConversationItem: React.FC<{
   onDelete: (id: string) => void;
 }> = ({ conv, isActive, isGenerating: convGenerating, theme, onSelect, onDelete }) => {
   const isDark = theme === 'dark';
-  const count = conv.items.length;
+  const count = conv.items.filter(it => !it.error).length;
 
   return (
     <div

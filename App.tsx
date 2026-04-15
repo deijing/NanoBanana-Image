@@ -91,7 +91,7 @@ const App: React.FC = () => {
   const currentInputImage = activeGenState?.inputImage;
 
   // 所有对话总项数（用于侧栏显示）
-  const totalItems = useMemo(() => conversations.reduce((s, c) => s + c.items.length, 0), [conversations]);
+  const totalItems = useMemo(() => conversations.reduce((s, c) => s + c.items.filter(it => !it.error).length, 0), [conversations]);
 
   // ── 模态框 ────────────────────────────────────────────
   const [modalOpen, setModalOpen] = useState(false);
