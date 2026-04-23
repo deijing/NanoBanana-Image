@@ -85,13 +85,12 @@ export async function optimizePrompt(
   return text;
 }
 
+// ── 通用常量 ──────────────────────────────────────────────
+
+const GPT_QUALITY_MAP: Record<string, string> = { '1K': 'low', '2K': 'high', '4K': 'high' };
+
 // ── gpt-image-2 辅助 ──────────────────────────────────────
 
-/**
- * 把应用里的 aspectRatio + size 档位（1K/2K/4K）映射到 gpt-image-2 要求的像素尺寸字符串。
- * 约束：两边为 16 的倍数；长边 ≤ 3840；总像素 ∈ [655360, 8294400]；长短边比 ≤ 3:1。
- * aspectRatio=Auto 返回 "auto"。
- */
 export function mapToGptImage2Size(aspectRatio: string, sizeBucket?: string): string {
   if (!aspectRatio || aspectRatio === 'Auto') return 'auto';
   const m = aspectRatio.match(/^(\d+):(\d+)$/);
@@ -166,27 +165,37 @@ async function callGptImage2(
 ): Promise<{ mimeType: string; base64: string }> {
   const base = normalizeBaseUrl(baseUrl);
   const size = mapToGptImage2Size(req.aspectRatio, req.size);
-  const quality = req.size === '1K' ? 'low' : req.size === '4K' ? 'high' : 'medium';
+  const quality = GPT_QUALITY_MAP[req.size || '2K'] || 'high';
   const apiModelId = modelCfg.apiModelId || 'gpt-image-2';
 
   const hasRefImages = req.mode === 'img2img' && (req.inputImages?.length ?? 0) > 0;
 
+  // 多轮对话：取历史中最后一张生成图作为参考图走 edits
+  const lastHistoryImage = req.history?.filter(h => h.imageData).at(-1)?.imageData;
+  const shouldUseEdits = hasRefImages || (!hasRefImages && !!lastHistoryImage);
+
   let res: Response;
-  if (hasRefImages) {
+  if (shouldUseEdits) {
     const form = new FormData();
     form.append('model', apiModelId);
     form.append('prompt', finalPrompt);
-    if (size !== 'auto') form.append('size', size);
+    form.append('size', size);
     form.append('quality', quality);
+    form.append('response_format', 'b64_json');
     form.append('n', '1');
-    form.append('output_format', 'png');
-    // OpenAI 规范：多图用 image[] 字段，最多 16 张
-    const imgs = (req.inputImages ?? []).slice(0, 16);
-    imgs.forEach((img, idx) => {
-      const { mimeType, base64 } = stripDataUriPrefix(img.data);
-      const blob = base64ToBlob(base64, img.mimeType || mimeType);
-      form.append('image[]', blob, `ref_${idx}.${mimeExt(img.mimeType || mimeType)}`);
-    });
+
+    if (hasRefImages) {
+      const imgs = (req.inputImages ?? []).slice(0, 16);
+      imgs.forEach((img, idx) => {
+        const { mimeType, base64 } = stripDataUriPrefix(img.data);
+        const blob = base64ToBlob(base64, img.mimeType || mimeType);
+        form.append('image', blob, `ref_${idx}.${mimeExt(img.mimeType || mimeType)}`);
+      });
+    } else if (lastHistoryImage) {
+      const { mimeType, base64 } = stripDataUriPrefix(lastHistoryImage);
+      const blob = base64ToBlob(base64, mimeType);
+      form.append('image', blob, `prev_gen.${mimeExt(mimeType)}`);
+    }
     res = await fetchWithRetry(
       `${base}${modelCfg.editsPath || '/v1/images/edits'}`,
       { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form },
@@ -198,10 +207,10 @@ async function callGptImage2(
       model: apiModelId,
       prompt: finalPrompt,
       n: 1,
-      output_format: 'png',
+      response_format: 'b64_json',
+      size,
       quality,
     };
-    if (size !== 'auto') body.size = size;
     res = await fetchWithRetry(
       `${base}${modelCfg.modelPath}`,
       {
@@ -224,7 +233,7 @@ async function callGptImage2(
   const b64 = item?.b64_json as string | undefined;
   if (b64) return { mimeType: 'image/png', base64: b64 };
 
-  // 少数中转会直接返回 url，补个兜底（仍然尽量返回 base64）
+  // 兜底：部分中转返回 url
   const url = item?.url as string | undefined;
   if (url) {
     const imgRes = await fetch(url, { signal });
@@ -235,7 +244,8 @@ async function callGptImage2(
     return { mimeType: imgRes.headers.get('content-type') || 'image/png', base64: btoa(binary) };
   }
 
-  throw new Error('响应中无图片数据');
+  const snippet = JSON.stringify(json, null, 2).slice(0, 800);
+  throw new Error(`GPT 响应结构异常，缺少 data[0].b64_json\n响应片段: ${snippet}`);
 }
 
 // ── 图片生成 ──────────────────────────────────────────────
