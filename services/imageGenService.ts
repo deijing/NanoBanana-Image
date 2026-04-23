@@ -179,7 +179,7 @@ async function callGptImage2(
     const form = new FormData();
     form.append('model', apiModelId);
     form.append('prompt', finalPrompt);
-    form.append('size', 'auto');
+    form.append('size', size);
     form.append('quality', quality);
     form.append('response_format', 'b64_json');
     form.append('n', '1');
@@ -208,7 +208,7 @@ async function callGptImage2(
       prompt: finalPrompt,
       n: 1,
       response_format: 'b64_json',
-      size: 'auto',
+      size,
       quality,
     };
     res = await fetchWithRetry(
